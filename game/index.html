@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DEPOT HEX — a three.js tactical FPS</title>
+<style>
+  /* DEPOT HEX HUD: night-depot palette, one accent, monospace readouts. */
+  :root {
+    --canvas: #10141c;
+    --surface: #232b38;
+    --hairline: #39445a;
+    --ink: #dfe6f2;
+    --muted: #77839b;
+    --accent: #f2a33c;
+    --teal: #3fd0c9;
+    --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-readout: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--canvas); color: var(--ink); font-family: var(--font-ui); }
+  #game, #game canvas { position: fixed; inset: 0; display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+
+  .corner { position: absolute; font-family: var(--font-readout); }
+  #health-wrap { left: 22px; bottom: 20px; width: 240px; }
+  #health-bar-track { height: 6px; background: var(--hairline); border-radius: 3px; overflow: hidden; margin-top: 5px; }
+  #health-bar { height: 100%; width: 100%; background: var(--teal); transition: width 120ms ease; }
+  #health-num { font-size: 26px; font-weight: 700; }
+  #armour-num { font-size: 13px; color: var(--muted); margin-left: 8px; }
+  #ammo-wrap { right: 22px; bottom: 20px; text-align: right; }
+  #ammo { font-size: 34px; font-weight: 700; }
+  #reserve { font-size: 15px; color: var(--muted); }
+  #weapon-name { font-size: 12px; letter-spacing: 0.12em; color: var(--teal); text-transform: uppercase; }
+  #money { left: 22px; top: 18px; font-size: 16px; color: var(--teal); }
+  #round-timer { top: 14px; left: 50%; transform: translateX(-50%); font-size: 24px; font-weight: 700; }
+  .score { position: absolute; top: 14px; font-size: 15px; color: var(--muted); }
+  #score-t { right: calc(50% + 40px); color: var(--teal); }
+  #score-ct { left: calc(50% + 40px); color: var(--accent); }
+  #bomb-state { top: 46px; left: 50%; transform: translateX(-50%); color: var(--accent); font-size: 13px; letter-spacing: 0.14em; display: none; font-family: var(--font-readout); }
+  #prompt { bottom: 110px; left: 50%; transform: translateX(-50%); font-size: 13px; letter-spacing: 0.1em; color: var(--ink); background: rgba(16, 20, 28, 0.72); border: 1px solid var(--hairline); border-radius: 6px; padding: 6px 12px; display: none; font-family: var(--font-readout); }
+  #hitmarker { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 22px; opacity: 0; color: #fff; font-family: var(--font-readout); }
+  #crosshair { position: absolute; top: 50%; left: 50%; width: 14px; height: 14px; transform: translate(-50%, -50%); }
+  #crosshair::before, #crosshair::after { content: ''; position: absolute; background: rgba(223, 230, 242, 0.85); }
+  #crosshair::before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #crosshair::after { left: 0; top: 6px; width: 14px; height: 2px; }
+  #killfeed { position: absolute; right: 22px; top: 18px; text-align: right; font-family: var(--font-readout); font-size: 12px; }
+  .feed-row { background: rgba(16, 20, 28, 0.6); border: 1px solid var(--hairline); border-radius: 4px; padding: 3px 8px; margin-bottom: 4px; color: var(--muted); }
+  #damage-flash { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(242, 163, 60, 0.5) 100%); opacity: 0; transition: opacity 120ms ease; }
+
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(10, 13, 19, 0.82); pointer-events: none; }
+  #overlay-title { font-size: 44px; font-weight: 800; letter-spacing: 0.06em; margin: 0 0 10px; }
+  #overlay-sub { font-size: 14px; color: var(--muted); text-align: center; line-height: 1.7; font-family: var(--font-readout); }
+
+  #buy-menu { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 320px; background: rgba(22, 27, 36, 0.96); border: 1px solid var(--hairline); border-radius: 10px; padding: 18px; display: none; pointer-events: auto; }
+  #buy-menu h2 { margin: 0 0 4px; font-size: 15px; letter-spacing: 0.12em; color: var(--teal); }
+  #buy-money { font-size: 13px; color: var(--muted); margin-bottom: 12px; font-family: var(--font-readout); }
+  .buy-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 10px; border: 1px solid var(--hairline); border-radius: 6px; margin-bottom: 6px; cursor: pointer; font-size: 14px; }
+  .buy-row:hover { border-color: var(--teal); }
+  .buy-price { font-family: var(--font-readout); font-size: 13px; }
+  #buy-close { width: 100%; margin-top: 8px; padding: 8px; background: transparent; border: 1px solid var(--hairline); border-radius: 6px; color: var(--muted); font-size: 12px; cursor: pointer; letter-spacing: 0.1em; }
+  #buy-close:hover { color: var(--ink); border-color: var(--muted); }
+</style>
+<script type="importmap">
+  { "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud">
+  <div id="crosshair"></div>
+  <div id="hitmarker">✚</div>
+  <div id="damage-flash"></div>
+  <div id="killfeed"></div>
+  <div class="corner" id="money">$800</div>
+  <div class="corner score" id="score-t">0</div>
+  <div class="corner score" id="score-ct">0</div>
+  <div class="corner" id="round-timer">1:55</div>
+  <div id="bomb-state">BOMB PLANTED</div>
+  <div id="prompt"></div>
+  <div class="corner" id="health-wrap">
+    <span id="health-num">100</span><span id="armour-num">50</span>
+    <div id="health-bar-track"><div id="health-bar"></div></div>
+  </div>
+  <div class="corner" id="ammo-wrap">
+    <div id="weapon-name">KARABIN-7</div>
+    <span id="ammo">30</span> <span id="reserve">/ 90</span>
+  </div>
+  <div id="overlay">
+    <h1 id="overlay-title">DEPOT HEX</h1>
+    <p id="overlay-sub">Click to play</p>
+  </div>
+  <div id="buy-menu">
+    <h2>BUY — press B to close</h2>
+    <div id="buy-money">$800</div>
+    <div class="buy-row" data-weapon="rifle"><span>KARABIN-7 · auto rifle</span><span class="buy-price">$2700</span></div>
+    <div class="buy-row" data-weapon="marksman"><span>LONGSIGHT · semi marksman</span><span class="buy-price">$4450</span></div>
+    <div class="buy-row" data-weapon="sidearm"><span>WRENCH-9 · sidearm</span><span class="buy-price">free</span></div>
+    <button id="buy-close">CLOSE</button>
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
