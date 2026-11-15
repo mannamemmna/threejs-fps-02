@@ -81,7 +81,16 @@ let started = false;
 let plantT = 0;
 let grenade = null; // {position, velocity, fuse}
 let grenadeCount = 1;
-let frozen = false;
+const magazines = new Map();
+function equipOwned(key) {
+  if (!buy.owned[key] || weapon.state.def === WEAPONS[key]) return;
+  magazines.set(weapon.state.def, [weapon.state.mag, weapon.state.reserve]);
+  weapon.equip(WEAPONS[key]);
+  const saved = magazines.get(WEAPONS[key]);
+  if (saved) [weapon.state.mag, weapon.state.reserve] = saved;
+  hud.setWeapon(weapon.state.def.name);
+  hud.setAmmo(weapon.state.mag, weapon.state.reserve);
+}
 
 // --- Bomb model (view-model box the player carries until planted) ---
 const bombMesh = new THREE.Mesh(
@@ -117,7 +126,7 @@ document.querySelectorAll('.buy-row').forEach((row) => {
     if (!def || buy.owned[key] || body.money < def.price) return;
     body.money -= def.price;
     buy.owned[key] = true;
-    weapon.equip(def);
+    equipOwned(key);
     hud.setWeapon(def.name);
     hud.setMoney(body.money);
     hud.showBuy(body.money, buy.owned);
@@ -127,11 +136,13 @@ document.querySelectorAll('.buy-row').forEach((row) => {
 document.getElementById('buy-close').addEventListener('click', closeBuy);
 function closeBuy() {
   buy.open = false;
+  input.state.buyOpen = false;
   hud.hideBuy();
 }
 
 const input = createInput(renderer.domElement, {
   onBuyMenu(open) {
+    if (match.phase !== 'buy') { input.state.buyOpen = false; return; }
     buy.open = open;
     if (open) {
       hud.showBuy(body.money, buy.owned);
@@ -139,6 +150,9 @@ const input = createInput(renderer.domElement, {
     } else hud.hideBuy();
   },
   onKey(code) {
+    if (!body.alive || (match.phase !== 'live' && match.phase !== 'planted')) return;
+    if (code === 'Digit1') equipOwned(buy.owned.marksman ? 'marksman' : 'rifle');
+    if (code === 'Digit2') equipOwned('sidearm');
     if (code === 'KeyG' && grenadeCount > 0 && match.phase === 'live') throwGrenade();
     if (code === 'KeyE') tryInteract();
   },
@@ -147,8 +161,8 @@ const input = createInput(renderer.domElement, {
       started = true;
       hud.hideOverlay();
       if (match.phase === 'buy') startLive();
-      else if (match.phase === 'over' && !match.over) startRound();
-    } else if (!match.over && !buy.open) {
+      // Round-end clicks are handled by the document listener.
+    } else if (!match.over && match.phase !== 'over' && !buy.open) {
       hud.showOverlay('paused');
     }
   },
@@ -176,7 +190,14 @@ if (params.has('autostart')) {
 // A click while the round-over overlay shows restarts the round. The overlay itself is
 // pointer-events: none, so the listener lives on the document.
 document.addEventListener('click', () => {
-  if (match.phase === 'over' && !match.over) startRound();
+  if (match.phase === 'over') {
+    if (match.over) {
+      match.over = false; match.scoreT = 0; match.scoreCt = 0; match.round = 0;
+      body.money = 800; buy.owned = {rifle:false, marksman:false, sidearm:true};
+      weapon.equip(WEAPONS.sidearm); hud.setWeapon(weapon.state.def.name); hud.setScore(0, 0);
+    }
+    startRound();
+  }
 });
 
 // --- Shooting ---
@@ -239,9 +260,9 @@ function intersectBot(bot, origin, dir) {
     { mesh: bot.legs, part: 'legs' },
   ];
   let best = null;
-  const inv = new THREE.Matrix4().copy(bot.group.matrixWorld).invert();
-  const localOrigin = origin.clone().applyMatrix4(inv);
-  const localDir = dir.clone().transformDirection(inv);
+  // setFromObject returns world bounds: keep the ray in that same space.
+  const localOrigin = origin;
+  const localDir = dir;
   for (const p of parts) {
     const box3 = new THREE.Box3().setFromObject(p.mesh);
     const ray = new THREE.Ray(localOrigin, localDir);
@@ -308,13 +329,6 @@ function tryInteract() {
   if (match.phase === 'live' && inSite(body.position)) {
     plantT = PLANT_TIME;
     hud.showPrompt('PLANTING…');
-  } else if (match.phase === 'planted' && match.bomb) {
-    const d = Math.hypot(body.position.x - match.bomb.position.x, body.position.z - match.bomb.position.z);
-    if (d < 2.2) {
-      match.bomb.defusing = true;
-      match.bomb.defuseT = DEFUSE_TIME;
-      hud.showPrompt('DEFUSING…');
-    }
   }
 }
 
@@ -330,7 +344,7 @@ function stepPlant(dt) {
     if (plantT <= 0) {
       const site = inSite(body.position);
       match.phase = 'planted';
-      match.bomb = { site, timer: BOMB_TIME, defusing: false, defuseT: 0, position: new THREE.Vector3(body.position.x, 0.1, body.position.z) };
+      match.bomb = { site, timer: BOMB_TIME, defusing: false, defuseT: DEFUSE_TIME, position: new THREE.Vector3(body.position.x, 0.1, body.position.z) };
       plantedBomb.position.copy(match.bomb.position);
       plantedBomb.visible = true;
       bombMesh.visible = false;
@@ -341,9 +355,10 @@ function stepPlant(dt) {
     }
   }
   if (match.phase === 'planted' && match.bomb) {
+    const defender = bots.bots.find(b => b.alive && b.position.distanceTo(match.bomb.position) < 3.2);
+    match.bomb.defusing = !!defender;
     if (match.bomb.defusing) {
-      const d = Math.hypot(body.position.x - match.bomb.position.x, body.position.z - match.bomb.position.z);
-      const holding = input.state.keys.has('KeyE') && d < 2.2;
+      const holding = !!defender;
       if (!holding) {
         match.bomb.defusing = false;
         hud.showPrompt('');
@@ -352,14 +367,16 @@ function stepPlant(dt) {
         if (Math.floor(match.bomb.defuseT * 2) !== Math.floor((match.bomb.defuseT + dt) * 2)) sfx.beep(true);
         if (match.bomb.defuseT <= 0) {
           hud.showPrompt('');
-          endRound(true, 'bomb defused');
+          endRound(false, 'defenders disarmed the bomb');
+          return;
         }
       }
     }
+    if (!defender) match.bomb.defuseT = DEFUSE_TIME;
     match.bomb.timer -= dt;
     const tickPhase = match.bomb.timer < 10 ? 0.24 : match.bomb.timer < 25 ? 0.55 : 1.1;
     if (Math.floor(match.bomb.timer / tickPhase) !== Math.floor((match.bomb.timer + dt) / tickPhase)) sfx.beep(match.bomb.timer < 10);
-    if (match.bomb.timer <= 0) endRound(false, 'the bomb detonated');
+    if (match.bomb.timer <= 0) endRound(true, 'the bomb detonated');
   }
 }
 
@@ -380,7 +397,7 @@ function hurtPlayer(amount) {
     body.alive = false;
     body.deaths += 1;
     hud.feedLine('a bot ▸ you');
-    setTimeout(() => endRound(false, 'you were eliminated'), 600);
+    endRound(false, 'you were eliminated');
   }
 }
 
@@ -414,11 +431,12 @@ function endRound(won, why) {
   if (document.pointerLockElement) document.exitPointerLock();
   if (match.scoreT >= MATCH_TARGET || match.scoreCt >= MATCH_TARGET) {
     match.over = true;
-    setTimeout(() => hud.showOverlay('match', match.scoreT, match.scoreCt, body.money), 1400);
+    hud.showOverlay('match', match.scoreT, match.scoreCt, body.money);
   }
 }
 
 function startRound() {
+  if (document.pointerLockElement) document.exitPointerLock();
   match.round += 1;
   match.phase = 'buy';
   match.timer = ROUND_TIME;
@@ -434,6 +452,8 @@ function startRound() {
   body.armour = 50;
   body.position.set(0, 0, 21);
   body.velocity.set(0, 0, 0);
+  body.pitch = 0; body.yaw = 0;
+  magazines.clear();
   weapon.refill();
   hud.setHealth(body.hp, body.armour);
   hud.setAmmo(weapon.state.mag, weapon.state.reserve);
@@ -441,10 +461,14 @@ function startRound() {
   hud.showOverlay('start');
   hud.showBuy(body.money, buy.owned);
   buy.open = true;
+  input.state.buyOpen = true;
+  input.state.locked = false;
+  if (grenade) { scene.remove(grenade.mesh); grenade = null; }
 }
 
 // --- Simulation step ---
 function step(dt) {
+  if (!started || !input.state.locked || buy.open || match.phase === 'over' || match.phase === 'buy') return;
   elapsed += dt;
   if (match.phase === 'live' || match.phase === 'planted') {
     match.timer -= dt;
@@ -462,12 +486,16 @@ function step(dt) {
     }
     if (input.state.keys.has('KeyR')) weapon.reload();
     weapon.step(dt, player.groundSpeed() > 0.5);
+    syncCamera();
+    hud.setAmmo(weapon.state.mag, weapon.state.reserve);
     stepPlant(dt);
     stepGrenade(dt);
   } else {
     weapon.step(dt, false);
   }
-  bots.step(dt, elapsed, camera.position, botShoot);
+  if (match.phase === 'over') return;
+  bots.step(dt, elapsed, camera.position, botShoot, match.bomb?.position);
+  if (bots.aliveCount() === 0) endRound(true, 'enemy team eliminated');
   // Prompt hints.
   if (body.alive && match.phase === 'live' && !plantT) {
     const site = inSite(body.position);
@@ -525,7 +553,7 @@ hud.setMoney(body.money);
 hud.setScore(0, 0);
 hud.setRoundTimer(fmt(ROUND_TIME), false);
 bombMesh.visible = true;
-hud.showOverlay('start');
+if (!started) hud.showOverlay('start');
 requestAnimationFrame(frame);
 
 // Debug hook (harmless in production): lets a headless probe inspect the live scene.
@@ -536,6 +564,8 @@ window.__DBG = () => ({
   camPos: camera.position.toArray().map((n) => Math.round(n * 100) / 100),
   camRot: [camera.rotation.x, camera.rotation.y, camera.rotation.z].map((n) => Math.round(n * 100) / 100),
   phase: match.phase,
+  locked: input.state.locked, hp: body.hp, ammo: weapon.state.mag, reserve: weapon.state.reserve,
+  score: [match.scoreT, match.scoreCt], bomb: match.bomb ? {timer: match.bomb.timer, defuseT: match.bomb.defuseT} : null,
   timer: Math.round(match.timer),
   bots: bots.bots.map((b) => ({ hp: b.hp, alive: b.alive, state: b.state, x: Math.round(b.position.x * 10) / 10, z: Math.round(b.position.z * 10) / 10 })),
 });

@@ -95,8 +95,11 @@ export function createWorld(scene) {
   box(1.4, 2.0, 1.4, 0, 1.0, -22.4, 'surface');
 
   // Light: cold hemisphere night, one warm floodlight over the plaza, one over each site.
-  const sky = new THREE.HemisphereLight(new THREE.Color('#31415e'), new THREE.Color('#0b0e14'), 5.0);
+  const sky = new THREE.HemisphereLight(new THREE.Color('#b6c9e8'), new THREE.Color('#586172'), 3.2);
   scene.add(sky);
+  const moon = new THREE.DirectionalLight('#d5e4ff', 2.0);
+  moon.position.set(-12, 22, 8);
+  scene.add(moon);
 
   function floodlight(x, z, intensity, targetY) {
     const lamp = new THREE.SpotLight(new THREE.Color('#ffd9a0'), intensity, 40, Math.PI / 5, 0.55, 1.4);
@@ -125,7 +128,7 @@ export function createWorld(scene) {
       new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.accent), transparent: true, opacity: 0.55 }),
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(site.x, 0.02, site.z);
+    ring.position.set(site.x, key === 'A' ? 0.62 : 1.02, site.z);
     group.add(ring);
   }
 

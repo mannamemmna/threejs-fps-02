@@ -75,7 +75,7 @@ export function createHud() {
     const sub = document.getElementById('overlay-sub');
     if (kind === 'start') {
       title.textContent = 'DEPOT HEX';
-      sub.innerHTML = 'DEFUSE: plant at A or B, or stop the push.<br>Click to play · WASD move · B buy menu';
+      sub.innerHTML = 'ATTACK: plant at A or B and protect the charge, or eliminate the defenders.<br>Click to play · WASD move · B buy before round<br>R reload · Ctrl crouch · G frag · E plant · 1/2 weapons · Esc pause';
     } else if (kind === 'won') {
       title.textContent = 'ROUND WON';
       sub.textContent = `score ${scoreT} — ${scoreCt} · $${money}`;
@@ -97,7 +97,7 @@ export function createHud() {
   }
 
   function showBuy(money, owned) {
-    buyMenu.style.display = 'flex';
+    buyMenu.style.display = 'block';
     const rows = buyMenu.querySelectorAll('.buy-row');
     rows.forEach((row) => {
       const key = row.dataset.weapon;

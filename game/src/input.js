@@ -24,7 +24,12 @@ export function createInput(canvas, hooks = {}) {
     if (event.button === 0) state.firing = false;
   });
   document.addEventListener('keydown', (event) => {
-    if (event.code === 'Tab') event.preventDefault();
+    if (event.code === 'Tab' || event.code === 'Space') event.preventDefault();
+    if (event.code === 'Escape') {
+      state.locked = false; state.firing = false; state.keys.clear();
+      if (hooks.onLockChange) hooks.onLockChange(false);
+      return;
+    }
     if (event.repeat) return;
     state.keys.add(event.code);
     if (event.code === 'Digit1') state.slot = 0;
@@ -40,9 +45,18 @@ export function createInput(canvas, hooks = {}) {
     state.keys.delete(event.code);
   });
 
-  function requestLock() {
-    canvas.requestPointerLock?.();
+  function startWithoutLock() {
+    state.locked = true;
+    if (hooks.onLockChange) hooks.onLockChange(true);
   }
+  function requestLock() {
+    // Browsers may deny pointer lock; the same click still starts mouse-look play.
+    startWithoutLock();
+    try { canvas.requestPointerLock?.()?.catch(startWithoutLock); } catch { startWithoutLock(); }
+  }
+  document.addEventListener('pointerlockerror', () => {
+    if (!state.buyOpen) startWithoutLock();
+  });
 
   document.addEventListener('pointerlockchange', () => {
     state.locked = document.pointerLockElement === canvas;

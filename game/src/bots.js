@@ -96,21 +96,14 @@ export function createBots(scene, world, count = 4) {
     return false;
   }
 
-  function step(dt, elapsed, playerEye, onShoot) {
+  function step(dt, elapsed, playerEye, onShoot, bombPosition) {
     for (const bot of bots) {
       if (!bot.alive) {
-        bot.respawnT -= dt;
+        bot.deathT += dt;
         const t = Math.min(1, bot.deathT / 0.4);
         bot.group.rotation.x = t * (Math.PI / 2);
         bot.group.position.y = -0.1 * t;
-        if (bot.respawnT <= 0) {
-          bot.alive = true;
-          bot.hp = 100;
-          bot.state = 'patrol';
-          bot.group.rotation.x = 0;
-          bot.wp = (bot.wp + 2) % bot.route.length;
-          placeAtWaypoint(bot);
-        }
+        // Eliminated defenders return only at the next round.
         continue;
       }
       const sees = canSee(bot, playerEye);
@@ -163,6 +156,10 @@ export function createBots(scene, world, count = 4) {
         bot.yaw = Math.atan2(-dx, -dz);
       }
 
+      if (bombPosition) {
+        moveTarget = bot.position.distanceTo(bombPosition) > 1.8 ? bombPosition : null;
+        bot.state = 'defuse';
+      }
       if (moveTarget) {
         const dx = moveTarget.x - bot.position.x;
         const dz = moveTarget.z - bot.position.z;
@@ -218,6 +215,7 @@ export function createBots(scene, world, count = 4) {
       bot.state = 'patrol';
       bot.group.rotation.x = 0;
       bot.wp = 0;
+      bot.reactT = 0; bot.fireCd = 0; bot.lastSeen = null;
       placeAtWaypoint(bot);
     }
   }
